@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src https://script.google.com https://script.googleusercontent.com; base-uri 'none'; form-action 'none'">
+  <title>Drive Notifications</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app">
+    <h1>Drive Notifications</h1>
+    <p id="status" class="note">Loading your folders…</p>
+    <section id="signed-in" hidden>
+      <p>You're signed in as <strong id="email"></strong>.</p>
+      <p>Folders you can open in the test drive:</p>
+      <ul id="folders"></ul>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

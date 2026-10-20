@@ -1,0 +1,37 @@
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 18px;
+  line-height: 1.45;
+  margin: 0;
+  color: #202124;
+  background: #ffffff;
+}
+
+main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+h1 {
+  font-size: 24px;
+  margin: 8px 0 16px;
+}
+
+ul {
+  padding-left: 20px;
+}
+
+li {
+  margin: 10px 0;
+}
+
+.note {
+  color: #5f6368;
+  font-size: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  body { color: #e8eaed; background: #202124; }
+  .note { color: #bdc1c6; }
+}
