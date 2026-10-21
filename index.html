@@ -11,13 +11,53 @@
 </head>
 <body>
   <main id="app">
-    <h1>Drive Notifications</h1>
-    <p id="status" class="note">Loading your folders…</p>
-    <section id="signed-in" hidden>
-      <p>You're signed in as <strong id="email"></strong>.</p>
-      <p>Folders you can open in the test drive:</p>
-      <ul id="folders"></ul>
+    <header class="top">
+      <h1>Drive Notifications</h1>
+      <p id="who" class="note" hidden>
+        <span>Signed in as <strong id="who-email"></strong></span>
+        <button type="button" id="signout" class="link">Sign out</button>
+      </p>
+    </header>
+
+    <p id="status" class="note" role="status">Loading…</p>
+
+    <section id="signin" hidden>
+      <h2>Get your link</h2>
+      <p id="signin-reason" class="warn" hidden></p>
+      <p>Enter the email address you use with the church's group drives. We'll email you a link to your page.</p>
+      <form id="signin-form" novalidate>
+        <label for="signin-email">Email address</label>
+        <input id="signin-email" type="email" autocomplete="email" inputmode="email" required>
+        <div class="hp" aria-hidden="true">
+          <label for="signin-website">Leave this empty</label>
+          <input id="signin-website" type="text" tabindex="-1" autocomplete="off">
+        </div>
+        <button type="submit" class="primary" id="signin-button">Email me my link</button>
+      </form>
+      <p id="signin-done" class="done" hidden></p>
     </section>
+
+    <section id="mine" hidden>
+      <h2>Folders you follow</h2>
+      <p id="mine-empty" class="note" hidden>You don't follow any folders yet. Pick some below.</p>
+      <div id="mine-list"></div>
+    </section>
+
+    <section id="recs" hidden>
+      <h2>Recommended for you</h2>
+      <div id="recs-list"></div>
+    </section>
+
+    <section id="all" hidden>
+      <h2>All your folders</h2>
+      <button type="button" id="all-toggle" class="secondary">See all your folders</button>
+      <div id="all-list" hidden></div>
+    </section>
+
+    <div id="toast" role="status" aria-live="polite" hidden>
+      <span id="toast-text"></span>
+      <button type="button" id="toast-action" class="link" hidden></button>
+    </div>
   </main>
   <script src="app.js"></script>
 </body>
