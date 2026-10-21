@@ -152,7 +152,7 @@ async function requestLink(event) {
   }
   // The answer is the same for every address, so confirm at once and send in the background.
   $('signin-form').hidden = true;
-  $('signin-done').textContent = `Thank you. If ${email} can use the church's group drives, an email with ` +
+  $('signin-done').textContent = `Thank you. If ${email} can use the church's Shared Drives, an email with ` +
     'your link is on its way. It can take a minute or two. If it doesn\'t arrive, check your spam folder.';
   $('signin-done').hidden = false;
   try {
@@ -215,8 +215,8 @@ function render() {
   $('who-email').textContent = view.email;
 
   if (!view.drives.length) {
-    setStatus('Your email address doesn\'t have access to any church group drive folders yet. ' +
-      'Ask the person who manages your team\'s drive to add you.');
+    setStatus('Your email address doesn\'t have access to any church Shared Drive folders yet. ' +
+      'Ask a Manager of your team\'s Shared Drive to add you.');
     ['mine', 'recs', 'all', 'manage'].forEach((id) => { $(id).hidden = true; });
     return;
   }
