@@ -4,12 +4,17 @@
 // they can open, with one-tap Follow and Stop. All data comes from the Apps
 // Script service; requests carry no Google sign-in cookies, so the page works
 // however many Google accounts the browser is signed into.
+//
+// The service takes a few seconds to answer, so the page never waits for it:
+// changes show at once and save in the background, and the last list seen on
+// this device appears immediately while a fresh copy loads.
 
 const API_URL = 'https://script.google.com/macros/s/AKfycbx0l9REFPIVIQ23Kchi82x-m-sOr_hAsS6_iVXP-Q5k6q0pp--CFST62obpij3mIbMSiA/exec';
 const STORE_KEY = 'driveNotifications.link';
+const VIEW_KEY = 'driveNotifications.view';
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-const state = { token: '', view: null, busy: false };
+const state = { token: '', view: null, pending: 0 };
 const $ = (id) => document.getElementById(id);
 
 // ---- Small helpers ------------------------------------------------------------
@@ -48,6 +53,33 @@ function storeToken(token) {
   } catch (e) {
     // Private browsing: the page still works from the emailed link.
   }
+}
+
+/** Remembers the last list shown, so the next visit can show it instantly. */
+function saveView() {
+  try {
+    if (state.view) localStorage.setItem(VIEW_KEY, JSON.stringify({ token: state.token, view: state.view }));
+    else localStorage.removeItem(VIEW_KEY);
+  } catch (e) {
+    // Not available: the page just waits for the service instead.
+  }
+}
+
+function savedView() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(VIEW_KEY) || 'null');
+    return saved && saved.token === state.token ? saved.view : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function forgetLink(reason) {
+  storeToken('');
+  state.token = '';
+  state.view = null;
+  saveView();
+  showSignIn(reason);
 }
 
 function readToken() {
@@ -118,48 +150,51 @@ async function requestLink(event) {
     toast('Please enter your full email address, like name@gmail.com.');
     return;
   }
-  const button = $('signin-button');
-  button.disabled = true;
-  button.textContent = 'Sending…';
+  // The answer is the same for every address, so confirm at once and send in the background.
+  $('signin-form').hidden = true;
+  $('signin-done').textContent = `Thank you. If ${email} can use the church's group drives, an email with ` +
+    'your link is on its way. It can take a minute or two. If it doesn\'t arrive, check your spam folder.';
+  $('signin-done').hidden = false;
   try {
     await api('requestLink', { email: email, website: $('signin-website').value });
-    $('signin-form').hidden = true;
-    $('signin-done').textContent = `Thank you. If ${email} can use the church's group drives, an email with ` +
-      'your link is on its way. It can take a minute or two. If it doesn\'t arrive, check your spam folder.';
-    $('signin-done').hidden = false;
   } catch (e) {
+    $('signin-done').hidden = true;
+    $('signin-form').hidden = false;
     toast('We couldn\'t send that. Check your internet connection and try again.');
-  } finally {
-    button.disabled = false;
-    button.textContent = 'Email me my link';
   }
 }
 
 function signOut() {
-  storeToken('');
-  state.token = '';
   history.replaceState(null, '', location.pathname);
-  showSignIn('');
+  forgetLink('');
 }
 
 // ---- Loading and showing the page ---------------------------------------------
 
+const LINK_GONE = 'That link no longer works. Enter your email address and we\'ll send you a new one.';
+
 async function load() {
-  setStatus('Loading your folders…');
+  // Show the last list seen on this device straight away, if there is one.
+  const saved = savedView();
+  if (saved) {
+    state.view = saved;
+    render();
+  } else {
+    setStatus('Loading your folders…');
+  }
   try {
     const view = await api('me', { token: state.token });
     if (!view.ok) {
-      if (view.error === 'invalid_link') {
-        storeToken('');
-        showSignIn('That link no longer works. Enter your email address and we\'ll send you a new one.');
-        return;
-      }
+      if (view.error === 'invalid_link') { forgetLink(LINK_GONE); return; }
       throw new Error(view.error);
     }
+    if (state.pending) return;   // a change is saving; its answer brings the latest list
     state.view = view;
     render();
+    saveView();
   } catch (e) {
-    setStatus('We couldn\'t reach Drive Notifications. Please try again in a minute.');
+    if (saved) toast('Showing your list from your last visit. We couldn\'t check for updates just now.');
+    else setStatus('We couldn\'t reach Drive Notifications. Please try again in a minute.');
   }
 }
 
@@ -325,56 +360,87 @@ function followedAncestor(folder, drive, followed) {
 }
 
 // ---- Changes ------------------------------------------------------------------
+//
+// Each change updates the screen at once, then saves in the background, one
+// save at a time and in order. If a save fails, the page reloads the list from
+// the service so the screen never shows something that wasn't saved.
 
-async function change(action, data) {
-  if (state.busy) return null;
-  state.busy = true;
-  // Block double taps on the folder lists while saving (the lists are redrawn afterwards).
-  document.querySelectorAll('#mine button, #mine select, #recs button, #all-list button')
-    .forEach((n) => { n.disabled = true; });
-  try {
-    const r = await api(action, Object.assign({ token: state.token }, data));
-    if (!r.ok) {
-      if (r.error === 'invalid_link') {
-        storeToken('');
-        showSignIn('That link no longer works. Enter your email address and we\'ll send you a new one.');
-        return null;
+let queue = Promise.resolve();
+
+function send(action, data) {
+  state.pending++;
+  document.body.setAttribute('data-saving', '');
+  queue = queue.then(async () => {
+    try {
+      const r = await api(action, Object.assign({ token: state.token }, data));
+      if (!r.ok) {
+        if (r.error === 'invalid_link') {
+          state.pending = 0;
+          document.body.removeAttribute('data-saving');
+          forgetLink(LINK_GONE);
+          return;
+        }
+        throw new Error(r.error);
       }
-      throw new Error(r.error);
+      // Only the last save in a quick series replaces the list, to avoid flicker.
+      if (state.pending === 1 && state.view) {
+        state.view.subscriptions = r.subscriptions;
+        render();
+        saveView();
+      }
+    } catch (e) {
+      toast('That change didn\'t save. Check your internet connection and try again.');
+      state.pending = Math.max(state.pending - 1, 0);
+      if (!state.pending) document.body.removeAttribute('data-saving');
+      return load();
     }
-    state.view.subscriptions = r.subscriptions;
-    return r;
-  } catch (e) {
-    toast('That didn\'t save. Check your internet connection and try again.');
-    return null;
-  } finally {
-    state.busy = false;
-    if (state.view) render();
+    state.pending = Math.max(state.pending - 1, 0);
+    if (!state.pending) document.body.removeAttribute('data-saving');
+  });
+  return queue;
+}
+
+/** Sets a follow on screen right away (adding it if it's new). */
+function setLocal(folderId, settings) {
+  const subs = state.view.subscriptions;
+  let sub = subs.find((s) => s.folderId === folderId);
+  if (!sub) {
+    const entry = folderIndex()[folderId];
+    sub = { folderId: folderId, driveId: entry ? entry.drive.driveId : '' };
+    subs.push(sub);
   }
+  Object.assign(sub, {
+    frequency: settings.frequency,
+    dailyHour: settings.frequency === 'daily' ? Number(settings.dailyHour) : sub.dailyHour,
+    weeklyDay: settings.frequency === 'weekly' ? settings.weeklyDay : sub.weeklyDay
+  });
+  render();
+  saveView();
+  return sub;
 }
 
-async function follow(folder) {
-  const d = state.view.defaults;
-  const r = await change('follow', { folderId: folder.id, frequency: 'daily', dailyHour: d.dailyHour });
-  if (r) toast(`You now follow ${folder.name}: an email once a day, at ${hourLabel(d.dailyHour)}, when something changes.`);
+function follow(folder) {
+  const hour = state.view.defaults.dailyHour;
+  setLocal(folder.id, { frequency: 'daily', dailyHour: hour });
+  toast(`You now follow ${folder.name}: an email once a day, at ${hourLabel(hour)}, when something changes.`);
+  send('follow', { folderId: folder.id, frequency: 'daily', dailyHour: hour });
 }
 
-async function save(folderId, settings, name) {
-  const r = await change('follow', Object.assign({ folderId: folderId }, settings));
-  if (r) {
-    const sub = r.subscriptions.find((s) => s.folderId === folderId);
-    if (sub) toast(`Saved. ${name}: ${describe(sub)}.`);
-  }
+function save(folderId, settings, name) {
+  const sub = setLocal(folderId, settings);
+  toast(`Saved. ${name}: ${describe(sub)}.`);
+  send('follow', Object.assign({ folderId: folderId }, settings));
 }
 
-async function unfollow(sub, name) {
+function unfollow(sub, name) {
   const before = Object.assign({}, sub);
-  const r = await change('unfollow', { folderId: sub.folderId });
-  if (r) {
-    toast(`You stopped following ${name}.`, 'Undo', () => save(before.folderId, {
-      frequency: before.frequency, dailyHour: before.dailyHour, weeklyDay: before.weeklyDay
-    }, name));
-  }
+  state.view.subscriptions = state.view.subscriptions.filter((s) => s.folderId !== sub.folderId);
+  render();
+  saveView();
+  toast(`You stopped following ${name}.`, 'Undo', () => save(before.folderId, {
+    frequency: before.frequency, dailyHour: before.dailyHour, weeklyDay: before.weeklyDay
+  }, name));
+  send('unfollow', { folderId: sub.folderId });
 }
 
 // ---- Start --------------------------------------------------------------------
