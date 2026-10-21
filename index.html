@@ -43,15 +43,21 @@
       <div id="mine-list"></div>
     </section>
 
-    <section id="recs" hidden>
-      <h2>Recommended for you</h2>
+    <details id="recs" class="section" hidden>
+      <summary id="recs-summary"><h2>Recommended for you <span id="recs-count" class="count"></span></h2></summary>
       <div id="recs-list"></div>
-    </section>
+    </details>
 
     <section id="all" hidden>
       <h2>All your folders</h2>
       <button type="button" id="all-toggle" class="secondary">See all your folders</button>
       <div id="all-list" hidden></div>
+    </section>
+
+    <section id="manage" hidden>
+      <h2>Manage recommendations</h2>
+      <p id="manage-intro" class="note"></p>
+      <div id="manage-list"></div>
     </section>
 
     <div id="toast" role="status" aria-live="polite" hidden>

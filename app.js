@@ -133,7 +133,7 @@ function setStatus(text) {
 
 function showSignIn(reason) {
   state.view = null;
-  ['who', 'mine', 'recs', 'all'].forEach((id) => { $(id).hidden = true; });
+  ['who', 'mine', 'recs', 'all', 'manage'].forEach((id) => { $(id).hidden = true; });
   setStatus('');
   $('signin').hidden = false;
   $('signin-reason').hidden = !reason;
@@ -217,7 +217,7 @@ function render() {
   if (!view.drives.length) {
     setStatus('Your email address doesn\'t have access to any church group drive folders yet. ' +
       'Ask the person who manages your team\'s drive to add you.');
-    ['mine', 'recs', 'all'].forEach((id) => { $(id).hidden = true; });
+    ['mine', 'recs', 'all', 'manage'].forEach((id) => { $(id).hidden = true; });
     return;
   }
 
@@ -229,6 +229,76 @@ function render() {
   renderMine(subs, index);
   renderRecommendations(followed, index);
   renderAll(followed, index);
+  renderManage();
+}
+
+// ---- Manage recommendations (drive Managers and the tool admin) ----------------
+
+const openManaged = {};
+function renderManage() {
+  const drives = state.view.drives.filter((d) => d.canManage);
+  $('manage').hidden = drives.length === 0;
+  const list = $('manage-list');
+  list.textContent = '';
+  if (!drives.length) return;
+  $('manage-intro').textContent = (state.view.isAdmin
+    ? 'As the tool admin, you can suggest folders in every Shared Drive for members to follow. '
+    : 'As a manager of Shared Drive(s), you can suggest folders for members to follow. ') +
+    'Restricted folders are marked, and are only ever shown to people who can open them.';
+
+  drives.forEach((drive) => {
+    const count = drive.folders.filter((f) => f.recommended).length;
+    const isOpen = drives.length === 1 || !!openManaged[drive.driveId];
+    const block = el('details', { className: 'drive', open: isOpen }, [
+      el('summary', {}, [
+        document.createTextNode(drive.name + ' '),
+        el('span', { className: 'count', text: count ? `(${count} recommended)` : '' })
+      ])
+    ]);
+    block.addEventListener('toggle', () => { openManaged[drive.driveId] = block.open; });
+    drive.folders.forEach((folder) => block.appendChild(manageRow(drive, folder)));
+    list.appendChild(block);
+  });
+}
+
+function manageRow(drive, folder) {
+  const depth = Math.min(folder.path.split(' › ').length - 1, 4);
+  const on = !!folder.recommended;
+  const toggle = el('button', {
+    type: 'button', className: 'switch', role: 'switch', 'aria-checked': on ? 'true' : 'false',
+    'aria-label': `Recommend ${folder.name}`, onclick: () => recommend(drive, folder, !on)
+  }, [el('span', { className: 'track' }), el('span', { text: 'Recommended' })]);
+
+  const children = [el('div', { className: 'manage-top' }, [el('span', { className: 'fname', text: folder.name }), toggle])];
+  if (folder.restricted) {
+    const n = folder.openCount;
+    const people = `${n} ${n === 1 ? 'person' : 'people'}`;
+    children.push(el('div', { className: 'restricted-label', text: '\u{1F512} Restricted' }));
+    let note;
+    if (folder.unreadable) {
+      note = 'The tool can\'t see who has access here, so only this drive\'s Managers get its updates.';
+    } else {
+      note = `Only ${people} can open this folder` + (folder.insideOf ? ` (it is inside ${folder.insideOf}).` : '.');
+      if (on) note += ` Recommended only to the ${people} who can open it.`;
+    }
+    children.push(el('div', { className: 'restricted-note', text: note }));
+  }
+  return el('div', { className: `manage-row depth-${depth}${folder.restricted ? ' restricted' : ''}` }, children);
+}
+
+function recommend(drive, folder, on) {
+  folder.recommended = on;
+  render();
+  saveView();
+  toast(on
+    ? `${folder.name} is now recommended to members of ${drive.name}.`
+    : `${folder.name} is no longer recommended.`);
+  send('recommend', { folderId: folder.id, recommended: on }, (r) => {
+    const ids = {};
+    r.recommended.forEach((id) => { ids[id] = true; });
+    const d = state.view.drives.find((x) => x.driveId === r.driveId);
+    if (d) d.folders.forEach((f) => { f.recommended = !!ids[f.id]; });
+  });
 }
 
 function renderMine(subs, index) {
@@ -290,13 +360,18 @@ function followedCard(sub, entry) {
 }
 
 /** Recommended folders, for each drive where the person follows nothing yet. */
+/**
+ * Every recommended folder the person can open and doesn't follow yet, in any
+ * drive. Folders inside a folder they already follow are left out, since they
+ * already get those updates.
+ */
 function renderRecommendations(followed, index) {
   const list = $('recs-list');
   list.textContent = '';
   let shown = 0;
   state.view.drives.forEach((drive) => {
-    if (drive.folders.some((f) => followed[f.id])) return;
-    const recs = drive.folders.filter((f) => f.recommended);
+    const recs = drive.folders.filter((f) =>
+      f.recommended && !followed[f.id] && !followedAncestor(f, drive, followed));
     if (!recs.length) return;
     list.appendChild(el('div', { className: 'drive-label', text: `From ${drive.name}` }));
     recs.forEach((folder) => {
@@ -311,6 +386,22 @@ function renderRecommendations(followed, index) {
     });
   });
   $('recs').hidden = shown === 0;
+  $('recs-count').textContent = `(${shown})`;
+  // Open unless the list is long; a choice made on this device is remembered.
+  const remembered = recsOpenChoice();
+  $('recs').open = remembered === null ? shown <= 6 : remembered;
+}
+
+const RECS_OPEN_KEY = 'driveNotifications.recommendationsOpen';
+let recsOpenThisVisit = null;   // used when the browser can't store the choice
+function recsOpenChoice() {
+  if (recsOpenThisVisit !== null) return recsOpenThisVisit;
+  try {
+    const v = localStorage.getItem(RECS_OPEN_KEY);
+    return v === null ? null : v === 'true';
+  } catch (e) {
+    return null;
+  }
 }
 
 let allOpen = false;
@@ -367,7 +458,9 @@ function followedAncestor(folder, drive, followed) {
 
 let queue = Promise.resolve();
 
-function send(action, data) {
+const applySubscriptions = (r) => { state.view.subscriptions = r.subscriptions; };
+
+function send(action, data, apply) {
   state.pending++;
   document.body.setAttribute('data-saving', '');
   queue = queue.then(async () => {
@@ -384,7 +477,7 @@ function send(action, data) {
       }
       // Only the last save in a quick series replaces the list, to avoid flicker.
       if (state.pending === 1 && state.view) {
-        state.view.subscriptions = r.subscriptions;
+        (apply || applySubscriptions)(r);
         render();
         saveView();
       }
@@ -452,6 +545,12 @@ function unfollow(sub, name) {
     return;
   }
   $('signin-form').addEventListener('submit', requestLink);
+  // Remember whether the person keeps "Recommended for you" open or closed.
+  $('recs-summary').addEventListener('click', () => {
+    const willOpen = !$('recs').open;
+    recsOpenThisVisit = willOpen;
+    try { localStorage.setItem(RECS_OPEN_KEY, String(willOpen)); } catch (e) { /* not available */ }
+  });
   $('signout').addEventListener('click', signOut);
   $('all-toggle').addEventListener('click', () => {
     allOpen = !allOpen;
