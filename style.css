@@ -148,6 +148,43 @@ details.drive > summary {
 .depth-3 { padding-left: 76px; }
 .depth-4 { padding-left: 96px; }
 
+/* Folder trees: a folder with folders inside has an arrow that opens and
+   closes it. Leaf folders get a blank space the same width so names line up. */
+.folder-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 0;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text);
+  text-align: left;
+  font-weight: inherit;
+}
+.folder-toggle:hover .fname-name { text-decoration: underline; }
+.fname.leaf { display: flex; gap: 10px; padding: 9px 0; }
+.chev {
+  flex: none;
+  width: 0;
+  height: 0;
+  margin: 8px 5px 0 4px;
+  border-left: 8px solid var(--accent);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  transition: transform 0.15s;
+}
+.folder-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.chev-space { flex: none; width: 17px; }
+.fname-text { display: flex; flex-direction: column; min-width: 0; }
+.fname-name { overflow-wrap: anywhere; }
+.hint { font-size: 15px; color: var(--quiet); }
+/* Line the Follow button and notes up with the folder name, past the arrow. */
+.folder-row > :not(.fname),
+.manage-row > :not(.manage-top) { margin-left: 27px; }
+
 /* Manage recommendations: a switch per folder; restricted folders tinted amber. */
 details.drive > summary .count { font-weight: 400; font-size: 15px; color: var(--quiet); }
 .manage-row {
@@ -164,7 +201,7 @@ details.drive > summary .count { font-weight: 400; font-size: 15px; color: var(-
 .manage-row.depth-3 { padding-left: 76px; }
 .manage-row.depth-4 { padding-left: 96px; }
 .manage-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.manage-top .fname { overflow-wrap: anywhere; }
+.manage-top .fname { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .restricted-label { color: var(--warn-text); font-size: 15px; font-weight: 600; }
 .restricted-note { color: var(--warn-text); font-size: 15px; }
 

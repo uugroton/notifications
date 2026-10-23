@@ -235,6 +235,7 @@ function render() {
 // ---- Manage recommendations (drive Managers and the tool admin) ----------------
 
 const openManaged = {};
+const openManagedFolders = {};   // folders opened in the manage list (all start closed)
 function renderManage() {
   const drives = state.view.drives.filter((d) => d.canManage);
   $('manage').hidden = drives.length === 0;
@@ -256,20 +257,26 @@ function renderManage() {
       ])
     ]);
     block.addEventListener('toggle', () => { openManaged[drive.driveId] = block.open; });
-    drive.folders.forEach((folder) => block.appendChild(manageRow(drive, folder)));
+    renderTree(buildTree(drive), 0, openManagedFolders,
+      (folder, nameEl, depth) => manageRow(drive, folder, nameEl, depth),
+      (node) => {
+        const r = countBelow(node, (f) => !!f.recommended);
+        return insideLabel(node) + (r ? `, ${r} recommended` : '');
+      },
+      block);
     list.appendChild(block);
   });
 }
 
-function manageRow(drive, folder) {
-  const depth = Math.min(folder.path.split(' › ').length - 1, 4);
+function manageRow(drive, folder, nameEl, treeDepth) {
+  const depth = Math.min(treeDepth, 4);
   const on = !!folder.recommended;
   const toggle = el('button', {
     type: 'button', className: 'switch', role: 'switch', 'aria-checked': on ? 'true' : 'false',
     'aria-label': `Recommend ${folder.name}`, onclick: () => recommend(drive, folder, !on)
   }, [el('span', { className: 'track' }), el('span', { text: 'Recommended' })]);
 
-  const children = [el('div', { className: 'manage-top' }, [el('span', { className: 'fname', text: folder.name }), toggle])];
+  const children = [el('div', { className: 'manage-top' }, [nameEl, toggle])];
   if (folder.restricted) {
     const n = folder.openCount;
     const people = `${n} ${n === 1 ? 'person' : 'people'}`;
@@ -406,6 +413,7 @@ function recsOpenChoice() {
 
 let allOpen = false;
 const openDrives = {};   // drives the person has expanded in the full list
+const openFolders = {};  // folders opened in the full list (all start closed)
 function renderAll(followed, index) {
   $('all').hidden = false;
   $('all-toggle').textContent = allOpen ? 'Hide the full list' : 'See all your folders';
@@ -419,8 +427,8 @@ function renderAll(followed, index) {
     const isOpen = many ? !!openDrives[drive.driveId] : true;
     const block = el('details', { className: 'drive', open: isOpen }, [el('summary', { text: drive.name })]);
     block.addEventListener('toggle', () => { openDrives[drive.driveId] = block.open; });
-    drive.folders.forEach((folder) => {
-      const depth = Math.min(folder.path.split(' › ').length - 1, 4);
+    const rowFor = (folder, nameEl, treeDepth) => {
+      const depth = Math.min(treeDepth, 4);
       const parentFollowed = followedAncestor(folder, drive, followed);
       let right;
       if (followed[folder.id]) {
@@ -431,11 +439,90 @@ function renderAll(followed, index) {
         right = el('button', { type: 'button', className: 'secondary', text: 'Follow',
           'aria-label': `Follow ${folder.name}`, onclick: () => follow(folder) });
       }
-      block.appendChild(el('div', { className: `folder-row depth-${depth}` }, [
-        el('span', { className: 'fname', text: folder.name }), right
-      ]));
-    });
+      return el('div', { className: `folder-row depth-${depth}` }, [nameEl, right]);
+    };
+    renderTree(buildTree(drive), 0, openFolders, rowFor, (node) => {
+      const f = countBelow(node, (x) => !!followed[x.id]);
+      return insideLabel(node) + (f ? `, ${f} followed` : '');
+    }, block);
     list.appendChild(block);
+  });
+}
+
+// ---- Folder trees ---------------------------------------------------------------
+//
+// Long drives (a folder for every month, say) are shown as a tree: a folder
+// with folders inside has an arrow that opens and closes it. Every folder
+// starts closed; the ones a person opens stay open while the page redraws
+// after a change, until they leave the page.
+
+/**
+ * Arranges a drive's folders into a tree using each folder's path. A folder
+ * whose parent isn't listed (inside a folder the person can't open, say)
+ * goes under its nearest listed ancestor, or at the top.
+ */
+function buildTree(drive) {
+  const nodes = drive.folders.map((folder) => ({ folder: folder, children: [] }));
+  const byPath = {};
+  nodes.forEach((n) => { if (!byPath[n.folder.path]) byPath[n.folder.path] = n; });
+  const roots = [];
+  nodes.forEach((n) => {
+    const parts = n.folder.path.split(' › ');
+    let parent = null;
+    for (let k = parts.length - 1; k > 0 && !parent; k--) parent = byPath[parts.slice(0, k).join(' › ')] || null;
+    (parent ? parent.children : roots).push(n);
+  });
+  return roots;
+}
+
+/** How many folders anywhere below this one pass the test. */
+function countBelow(node, test) {
+  return node.children.reduce((sum, c) => sum + (test(c.folder) ? 1 : 0) + countBelow(c, test), 0);
+}
+
+function insideLabel(node) {
+  const n = countBelow(node, () => true);
+  return `${n} ${n === 1 ? 'folder' : 'folders'} inside`;
+}
+
+/**
+ * Adds the rows for these folders, and their folders, to `into`.
+ * rowFor(folder, nameEl, depth) builds one row around the name element given;
+ * hintFor(node) is the small line under the name of a folder that has folders.
+ * `open` remembers which folders the person has opened.
+ */
+function renderTree(nodes, depth, open, rowFor, hintFor, into) {
+  nodes.forEach((node) => {
+    const folder = node.folder;
+    if (!node.children.length) {
+      into.appendChild(rowFor(folder, el('span', { className: 'fname leaf' }, [
+        el('span', { className: 'chev-space' }),
+        el('span', { className: 'fname-name', text: folder.name })
+      ]), depth));
+      return;
+    }
+    const isOpen = !!open[folder.id];
+    const inside = el('div', { className: 'branch', hidden: !isOpen });
+    const toggle = el('button', {
+      type: 'button', className: 'fname folder-toggle', 'aria-expanded': isOpen ? 'true' : 'false',
+      title: isOpen ? 'Hide the folders inside' : 'Show the folders inside',
+      onclick: () => {
+        const now = !open[folder.id];
+        open[folder.id] = now;
+        inside.hidden = !now;
+        toggle.setAttribute('aria-expanded', now ? 'true' : 'false');
+        toggle.title = now ? 'Hide the folders inside' : 'Show the folders inside';
+      }
+    }, [
+      el('span', { className: 'chev' }),
+      el('span', { className: 'fname-text' }, [
+        el('span', { className: 'fname-name', text: folder.name }),
+        el('span', { className: 'hint', text: hintFor(node) })
+      ])
+    ]);
+    into.appendChild(rowFor(folder, toggle, depth));
+    renderTree(node.children, depth + 1, open, rowFor, hintFor, inside);
+    into.appendChild(inside);
   });
 }
 
